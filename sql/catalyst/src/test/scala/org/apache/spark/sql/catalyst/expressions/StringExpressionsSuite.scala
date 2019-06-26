@@ -23,6 +23,14 @@ import org.apache.spark.sql.types._
 
 class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
 
+  test("decrypt") {
+    checkEvaluation(Decrypt(Literal("AmugRIw7l5foIi/LkqsLRQ=="),
+        Literal("aaaabbbbccccdddd"), Literal("a83jf01hf74ns03f")), "SecretMessage")
+
+    checkEvaluation(Decrypt(Literal("eNbrvy59v5RkKOYjcGruOQ=="),
+      Literal("aaaabbbbccccdddd"), Literal("a83jf01hf74ns03f")), "")
+  }
+
   test("concat") {
     def testConcat(inputs: String*): Unit = {
       val expected = if (inputs.contains(null)) null else inputs.mkString

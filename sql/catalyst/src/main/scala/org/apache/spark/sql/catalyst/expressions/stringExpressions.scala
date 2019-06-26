@@ -18,9 +18,12 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import java.net.{URI, URISyntaxException}
+import java.security.MessageDigest
 import java.text.{BreakIterator, DecimalFormat, DecimalFormatSymbols}
-import java.util.{HashMap, Locale, Map => JMap}
+import java.util.{Arrays, HashMap, Locale, Map => JMap}
 import java.util.regex.Pattern
+import javax.crypto.Cipher
+import javax.crypto.spec.{IvParameterSpec, SecretKeySpec}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -1871,6 +1874,86 @@ case class Base64(child: Expression) extends UnaryExpression with ImplicitCastIn
       s"""${ev.value} = UTF8String.fromBytes(
             ${classOf[CommonsBase64].getName}.encodeBase64($child));
        """})
+  }
+}
+
+/**
+ * Decrypts the argument using AES 256 Encryption
+ */
+@ExpressionDescription(
+usage = "_FUNC_(str) - Decrypts the argument using AES 256 Encryption",
+examples = """
+    Examples:
+      > SELECT _FUNC_('U3BhcmsgU1FM');
+       Spark SQL
+  """,
+since = "1.5.0")
+case class Decrypt(value: Expression, initVector: Expression, key: Expression)
+  extends TernaryExpression with ImplicitCastInputTypes {
+
+  // Returns StringType
+  override def dataType: DataType = StringType
+
+  override def inputTypes: Seq[DataType] = Seq(StringType, StringType, StringType)
+
+  override def children: Seq[Expression] = value :: initVector :: key :: Nil
+
+  @transient private lazy val result: StringBuffer = new StringBuffer
+
+  protected override def nullSafeEval(value: Any, initVector: Any, key: Any): Any = {
+    val ivSpec = new IvParameterSpec(initVector.toString.getBytes("UTF-8"))
+    val skeySpec = new SecretKeySpec(key.toString.getBytes("UTF-8"), "AES")
+    //  TODO: reuse cipher by making final
+    val cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING")
+    cipher.init(Cipher.DECRYPT_MODE, skeySpec, ivSpec)
+    val encryptedResult = new String(cipher.doFinal(CommonsBase64.decodeBase64(value.toString)))
+    // remove previous data from string buffer TODO: refactor, better way to null StringBuilder
+    result.delete(0, result.length)
+    // append to string buffer
+    result.append(encryptedResult.toString())
+    UTF8String.fromString(result.toString)
+  }
+
+  // TODO: refactor naming conventions
+  override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
+
+    val IvParameterSpec = classOf[javax.crypto.spec.IvParameterSpec].getName
+    val ivParameterSpec = ctx.freshName("ivParameterSpec")
+
+    val SecretKeySpec = classOf[javax.crypto.spec.SecretKeySpec].getName
+    val skeySpec = ctx.freshName("skeySpec")
+
+    val Cipher = classOf[javax.crypto.Cipher].getName
+    val cipher = ctx.freshName("cipher")
+
+    val classNameStringBuffer = classOf[java.lang.StringBuffer].getCanonicalName
+    val result = ctx.freshName("result")
+
+    nullSafeCodeGen(ctx, ev, (value, initVector, key) => {
+
+      s"""
+          try {
+            $IvParameterSpec $ivParameterSpec = new $IvParameterSpec(
+                  $initVector.toString().getBytes("UTF-8"));
+
+            $SecretKeySpec $skeySpec = new $SecretKeySpec(
+                  $key.toString().getBytes("UTF-8"), "AES");
+
+            $Cipher $cipher = $Cipher.getInstance("AES/CBC/PKCS5PADDING");
+            $cipher.init($Cipher.DECRYPT_MODE, $skeySpec, $ivParameterSpec);
+
+            $classNameStringBuffer $result = new $classNameStringBuffer();
+
+            $result.append(new String($cipher.doFinal(
+                   ${classOf[CommonsBase64].getName}.decodeBase64($value.toString()))).toString());
+
+            ${ev.value} = UTF8String.fromString($result.toString());
+
+          } catch (java.lang.Exception e) {
+            org.apache.spark.unsafe.Platform.throwException(e);
+          }
+       """
+    })
   }
 }
 

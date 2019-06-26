@@ -2204,6 +2204,16 @@ object functions {
   def base64(e: Column): Column = withExpr { Base64(e.expr) }
 
   /**
+   * Decrypts the string using AES 256 Encryption
+   *
+   * @group string_funcs
+   * @since 2.4.3
+   */
+  def decrypt(e: Column, initVector: String, key: String): Column = withExpr {
+    Decrypt(e.expr, lit(initVector).expr, lit(key).expr)
+  }
+
+  /**
    * Concatenates multiple input string columns together into a single string column,
    * using the given separator.
    *
