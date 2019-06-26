@@ -2215,10 +2215,10 @@ object functions {
   }
 
   /**
-   * Replace all substrings of the specified string value that match regexp with rep.
+   * Decrypts the string using AES 256 Encryption
    *
    * @group string_funcs
-   * @since 2.1.0
+   * @since 2.4.3
    */
   @scala.annotation.varargs
   def concat_ws(sep: String, exprs: Column*): Column = withExpr {
