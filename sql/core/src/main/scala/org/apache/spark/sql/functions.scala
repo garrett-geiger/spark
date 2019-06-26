@@ -2215,11 +2215,11 @@ object functions {
   }
 
   /**
-    * Replace all substrings of the specified string value that match regexp with rep.
-    *
-    * @group string_funcs
-    * @since 2.1.0
-    */
+   * Replace all substrings of the specified string value that match regexp with rep.
+   *
+   * @group string_funcs
+   * @since 2.1.0
+   */
   @scala.annotation.varargs
   def concat_ws(sep: String, exprs: Column*): Column = withExpr {
     ConcatWs(Literal.create(sep, StringType) +: exprs.map(_.expr))

@@ -20,10 +20,10 @@ package org.apache.spark.sql.catalyst.expressions
 import java.net.{URI, URISyntaxException}
 import java.security.MessageDigest
 import java.text.{BreakIterator, DecimalFormat, DecimalFormatSymbols}
-import java.util.{HashMap, Locale, Arrays, Map => JMap}
+import java.util.{Arrays, HashMap, Locale, Map => JMap}
 import java.util.regex.Pattern
 import javax.crypto.Cipher
-import javax.crypto.spec.SecretKeySpec
+import javax.crypto.spec.{IvParameterSpec, SecretKeySpec}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -1894,36 +1894,66 @@ case class Decrypt(value: Expression, initVector: Expression, key: Expression)
   // Returns StringType
   override def dataType: DataType = StringType
 
-  // Input types are StringType, StringType, StringType
-  override def inputTypes: Seq[AbstractDataType] = Seq(StringType, StringType, StringType)
+  override def inputTypes: Seq[DataType] = Seq(StringType, StringType, StringType)
 
-  // override children since class is not abstract  TODO: change this comment
   override def children: Seq[Expression] = value :: initVector :: key :: Nil
 
-  // for dev purposes, add private val salt
-  private val SALT: String =
-    "jMhKlOuJnM34G6NHkqo9V010GhLAqOpF0BePojHgh1HgNg8^72k"
-
-  def keyToSpec(key: String): SecretKeySpec = {
-    var keyBytes: Array[Byte] = (SALT + key).getBytes("UTF-8")
-    val sha: MessageDigest = MessageDigest.getInstance("SHA-1")
-    keyBytes = sha.digest(keyBytes)
-    keyBytes = Arrays.copyOf(keyBytes, 16)
-    new SecretKeySpec(keyBytes, "AES")
-  }
+  @transient private lazy val result: StringBuffer = new StringBuffer
 
   protected override def nullSafeEval(value: Any, initVector: Any, key: Any): Any = {
-    val cipher: Cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
-    cipher.init(Cipher.ENCRYPT_MODE, keyToSpec(key.toString))
-    new String(cipher.doFinal(CommonsBase64.decodeBase64(value.toString)))
+    val ivSpec = new IvParameterSpec(initVector.toString.getBytes("UTF-8"))
+    val skeySpec = new SecretKeySpec(key.toString.getBytes("UTF-8"), "AES")
+    //  TODO: reuse cipher by making final
+    val cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING")
+    cipher.init(Cipher.DECRYPT_MODE, skeySpec, ivSpec)
+    val encryptedResult = new String(cipher.doFinal(CommonsBase64.decodeBase64(value.toString)))
+    // remove previous data from string buffer TODO: refactor, better way to null StringBuilder
+    result.delete(0, result.length)
+    // append to string buffer
+    result.append(encryptedResult.toString())
+    UTF8String.fromString(result.toString)
   }
 
-//TODO: update this
+  // TODO: refactor naming conventions
   override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
+
+    val IvParameterSpec = classOf[javax.crypto.spec.IvParameterSpec].getName
+    val ivParameterSpec = ctx.freshName("ivParameterSpec")
+
+    val SecretKeySpec = classOf[javax.crypto.spec.SecretKeySpec].getName
+    val skeySpec = ctx.freshName("skeySpec")
+
+    val Cipher = classOf[javax.crypto.Cipher].getName
+    val cipher = ctx.freshName("cipher")
+
+    val classNameStringBuffer = classOf[java.lang.StringBuffer].getCanonicalName
+    val result = ctx.freshName("result")
+
     nullSafeCodeGen(ctx, ev, (value, initVector, key) => {
+
       s"""
-         ${ev.value} = ${classOf[CommonsBase64].getName}.decodeBase64($value.toString());
-       """})
+          try {
+            $IvParameterSpec $ivParameterSpec = new $IvParameterSpec(
+                  $initVector.toString().getBytes("UTF-8"));
+
+            $SecretKeySpec $skeySpec = new $SecretKeySpec(
+                  $key.toString().getBytes("UTF-8"), "AES");
+
+            $Cipher $cipher = $Cipher.getInstance("AES/CBC/PKCS5PADDING");
+            $cipher.init($Cipher.DECRYPT_MODE, $skeySpec, $ivParameterSpec);
+
+            $classNameStringBuffer $result = new $classNameStringBuffer();
+
+            $result.append(new String($cipher.doFinal(
+                   ${classOf[CommonsBase64].getName}.decodeBase64($value.toString()))).toString());
+
+            ${ev.value} = UTF8String.fromString($result.toString());
+
+          } catch (java.lang.Exception e) {
+            org.apache.spark.unsafe.Platform.throwException(e);
+          }
+       """
+    })
   }
 }
 
