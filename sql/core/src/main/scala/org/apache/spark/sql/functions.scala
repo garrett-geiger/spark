@@ -2210,6 +2210,16 @@ object functions {
    * @group string_funcs
    * @since 1.5.0
    */
+  def decrypt(e: Column, initVector: String, key: String): Column = withExpr {
+    Decrypt(e.expr, lit(initVector).expr, lit(key).expr)
+  }
+
+  /**
+    * Replace all substrings of the specified string value that match regexp with rep.
+    *
+    * @group string_funcs
+    * @since 2.1.0
+    */
   @scala.annotation.varargs
   def concat_ws(sep: String, exprs: Column*): Column = withExpr {
     ConcatWs(Literal.create(sep, StringType) +: exprs.map(_.expr))

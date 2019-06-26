@@ -18,9 +18,12 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import java.net.{URI, URISyntaxException}
+import java.security.MessageDigest
 import java.text.{BreakIterator, DecimalFormat, DecimalFormatSymbols}
-import java.util.{HashMap, Locale, Map => JMap}
+import java.util.{HashMap, Locale, Arrays, Map => JMap}
 import java.util.regex.Pattern
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -1870,6 +1873,56 @@ case class Base64(child: Expression) extends UnaryExpression with ImplicitCastIn
     nullSafeCodeGen(ctx, ev, (child) => {
       s"""${ev.value} = UTF8String.fromBytes(
             ${classOf[CommonsBase64].getName}.encodeBase64($child));
+       """})
+  }
+}
+
+/**
+ * Decrypts the argument using AES 256 Encryption
+ */
+@ExpressionDescription(
+usage = "_FUNC_(str) - Decrypts the argument using AES 256 Encryption",
+examples = """
+    Examples:
+      > SELECT _FUNC_('U3BhcmsgU1FM');
+       Spark SQL
+  """,
+since = "1.5.0")
+case class Decrypt(value: Expression, initVector: Expression, key: Expression)
+  extends TernaryExpression with ImplicitCastInputTypes {
+
+  // Returns StringType
+  override def dataType: DataType = StringType
+
+  // Input types are StringType, StringType, StringType
+  override def inputTypes: Seq[AbstractDataType] = Seq(StringType, StringType, StringType)
+
+  // override children since class is not abstract  TODO: change this comment
+  override def children: Seq[Expression] = value :: initVector :: key :: Nil
+
+  // for dev purposes, add private val salt
+  private val SALT: String =
+    "jMhKlOuJnM34G6NHkqo9V010GhLAqOpF0BePojHgh1HgNg8^72k"
+
+  def keyToSpec(key: String): SecretKeySpec = {
+    var keyBytes: Array[Byte] = (SALT + key).getBytes("UTF-8")
+    val sha: MessageDigest = MessageDigest.getInstance("SHA-1")
+    keyBytes = sha.digest(keyBytes)
+    keyBytes = Arrays.copyOf(keyBytes, 16)
+    new SecretKeySpec(keyBytes, "AES")
+  }
+
+  protected override def nullSafeEval(value: Any, initVector: Any, key: Any): Any = {
+    val cipher: Cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
+    cipher.init(Cipher.ENCRYPT_MODE, keyToSpec(key.toString))
+    new String(cipher.doFinal(CommonsBase64.decodeBase64(value.toString)))
+  }
+
+//TODO: update this
+  override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
+    nullSafeCodeGen(ctx, ev, (value, initVector, key) => {
+      s"""
+         ${ev.value} = ${classOf[CommonsBase64].getName}.decodeBase64($value.toString());
        """})
   }
 }
