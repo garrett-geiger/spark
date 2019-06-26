@@ -2204,21 +2204,21 @@ object functions {
   def base64(e: Column): Column = withExpr { Base64(e.expr) }
 
   /**
-   * Concatenates multiple input string columns together into a single string column,
-   * using the given separator.
+   * Decrypts the string using AES 256 Encryption
    *
    * @group string_funcs
-   * @since 1.5.0
+   * @since 2.4.3
    */
   def decrypt(e: Column, initVector: String, key: String): Column = withExpr {
     Decrypt(e.expr, lit(initVector).expr, lit(key).expr)
   }
 
   /**
-   * Decrypts the string using AES 256 Encryption
+   * Concatenates multiple input string columns together into a single string column,
+   * using the given separator.
    *
    * @group string_funcs
-   * @since 2.4.3
+   * @since 1.5.0
    */
   @scala.annotation.varargs
   def concat_ws(sep: String, exprs: Column*): Column = withExpr {
